@@ -40,26 +40,92 @@ def parabel_scheitelpunkt(values, center, window_width):
     vertex = float(np.clip(-coefficients[1] / (2 * coefficients[0]), start, end - 1))
     return vertex, float(np.polyval(coefficients, vertex))
 
-def ermittle_ut_werte(flexions, ankle_heights, fps, frame_count):
+def ermittle_tretphase(ankle_heights, torso_angles, fps, frame_count):
+    """Erkennt nur eine zusammenhaengende Phase mit regelmaessigem Treten."""
     start = int(fps)
     end = frame_count - int(fps)
     smoothed = np.convolve(ankle_heights, np.ones(5) / 5, mode="same")
-    ankle_minima = []
+    minima = []
     minimum_distance = max(2, int(fps / 3))
     for index in range(start + 1, end - 1):
         if smoothed[index] <= smoothed[index - 1] and smoothed[index] < smoothed[index + 1]:
-            if not ankle_minima or index - ankle_minima[-1] >= minimum_distance:
-                ankle_minima.append(index)
-    if len(ankle_minima) < 2:
+            if not minima or index - minima[-1] >= minimum_distance:
+                minima.append(index)
+    if len(minima) < 3:
         raise ValueError("Keine ausreichende Knoechelschwingung fuer Trittzyklen erkannt.")
-    cycle_width = max(3, int(round(float(np.median(np.diff(ankle_minima))) / 4.0)))
+
+    periods = np.diff(minima)
+    period_median = float(np.median(periods))
+    regular = np.abs(periods - period_median) <= max(2.0, period_median * 0.25)
+    groups = []
+    group_start = None
+    for index, is_regular in enumerate(regular):
+        if is_regular and group_start is None:
+            group_start = index
+        if (not is_regular or index == len(regular) - 1) and group_start is not None:
+            group_end = index if is_regular and index == len(regular) - 1 else index - 1
+            if group_end - group_start + 1 >= 2:
+                groups.append((group_start, group_end + 1))
+            group_start = None
+    if not groups:
+        raise ValueError("Keine regelmaessige Tretphase erkannt.")
+
+    best_group = max(groups, key=lambda item: item[1] - item[0])
+    first_minimum = minima[best_group[0]]
+    last_minimum = minima[best_group[1]]
+    phase_start = max(start, int(first_minimum - period_median // 2))
+    phase_end = min(end, int(last_minimum + period_median // 2))
+
+    stationary_window = max(2, int(round(fps * 0.5)))
+    ankle_amplitude = float(np.percentile(smoothed[phase_start:phase_end], 95) - np.percentile(smoothed[phase_start:phase_end], 5))
+    ankle_motion_limit = max(2.0, ankle_amplitude * 0.12)
+    stationary = np.zeros(frame_count, dtype=bool)
+    for index in range(phase_start, phase_end - stationary_window + 1):
+        ankle_range = np.ptp(smoothed[index:index + stationary_window])
+        torso_range = np.ptp(torso_angles[index:index + stationary_window])
+        if ankle_range <= ankle_motion_limit and torso_range <= 2.0:
+            stationary[index:index + stationary_window] = True
+    active_start = phase_start
+    active_end = phase_end
+    while active_start < active_end and stationary[active_start]:
+        active_start += 1
+    while active_end > active_start and stationary[active_end - 1]:
+        active_end -= 1
+    if active_end - active_start < int(period_median * 1.5):
+        raise ValueError("Die erkannte Tretphase ist zu kurz oder stationaer.")
+
+    phase_minima = [minimum for minimum in minima if active_start <= minimum <= active_end]
+    if len(phase_minima) < 2:
+        raise ValueError("Keine gueltigen Trittzyklen innerhalb der aktiven Phase erkannt.")
+    return active_start, active_end, phase_minima, smoothed, stationary
+
+
+def ermittle_ut_werte(flexions, ankle_heights, torso_angles, fps, frame_count):
+    phase_start, phase_end, minima, smoothed_ankles, stationary = ermittle_tretphase(
+        ankle_heights, torso_angles, fps, frame_count
+    )
+    cycle_lengths = np.diff(minima)
+    cycle_width = max(3, int(round(float(np.median(cycle_lengths)) / 4.0)))
+    cycle_mean_height = float(np.mean(smoothed_ankles[phase_start:phase_end]))
+    cycle_amplitude = float(np.ptp(smoothed_ankles[phase_start:phase_end]))
+    ground_limit = cycle_mean_height + max(3.0, cycle_amplitude * 0.35)
     frames, values = [], []
-    for cycle_start, cycle_end in zip(ankle_minima[:-1], ankle_minima[1:]):
-        local = cycle_start + int(np.argmin(flexions[cycle_start:cycle_end + 1]))
+    for cycle_start, cycle_end in zip(minima[:-1], minima[1:]):
+        candidate_start = max(phase_start, cycle_start)
+        candidate_end = min(phase_end, cycle_end + 1)
+        local = candidate_start + int(np.argmin(flexions[candidate_start:candidate_end]))
+        if local >= len(smoothed_ankles) or stationary[local] or smoothed_ankles[local] > ground_limit:
+            continue
+        if np.ptp(smoothed_ankles[max(phase_start, local - int(fps * 0.25)):min(phase_end, local + int(fps * 0.25) + 1)]) <= 2.0:
+            continue
         vertex, value = parabel_scheitelpunkt(flexions, local, cycle_width)
+        if vertex < phase_start or vertex >= phase_end:
+            continue
         frames.append(vertex)
         values.append(value)
-    return frames, values, cycle_width
+    if not values:
+        raise ValueError("Keine gueltigen unteren Totpunkte in der Tretphase erkannt.")
+    return frames, values, cycle_width, (phase_start, phase_end)
 
 def test_messkette():
     huefthoehe = berechne_huefthoehe(172.5, 430.0, 440.0, TARGET_FLEXION)
@@ -69,10 +135,24 @@ def test_messkette():
     for phase in np.linspace(0, 2 * math.pi, 8, endpoint=False):
         frames = np.arange(720, dtype=float)
         flexion = TARGET_FLEXION + 0.08 * rng.normal(size=len(frames))
-        ankle = np.sin(2 * math.pi * frames / 60 + phase)
-        _, values, _ = ermittle_ut_werte(flexion, ankle, 60.0, len(frames))
+        ankle = 20.0 * np.sin(2 * math.pi * frames / 60 + phase)
+        torso = np.zeros(len(frames))
+        _, values, _, _ = ermittle_ut_werte(flexion, ankle, torso, 60.0, len(frames))
         errors.extend(abs(value - TARGET_FLEXION) for value in values)
     assert float(np.mean(errors)) < 0.5
+
+    # Nach dem Treten steigt die Person ab: der Fuss bleibt tiefer und stationaer.
+    frames = np.arange(720, dtype=float)
+    flexion = TARGET_FLEXION + 0.08 * rng.normal(size=len(frames))
+    ankle = 20.0 * np.sin(2 * math.pi * frames / 60.0)
+    ankle[540:] = 100.0
+    torso = np.zeros(len(frames))
+    ut_frames, values, _, phase = ermittle_ut_werte(
+        flexion, ankle, torso, 60.0, len(frames)
+    )
+    assert values
+    assert max(ut_frames) < 540
+    assert phase[1] <= 540
 
 def berechne_winkel(p1, p2, p3):
     wert = math.degrees(math.atan2(p3[1] - p2[1], p3[0] - p2[0]) - math.atan2(p1[1] - p2[1], p1[0] - p2[0]))
@@ -222,11 +302,12 @@ def analysiere_video(video_pfad, dateiname, status_speicher, ergebnis_speicher, 
     start_f = int(fps)
     end_f = frame_count - int(fps)
     
-    ut_frames, ut_values, window = ermittle_ut_werte(
-        flexions, ankle_heights, fps, frame_count
+    ut_frames, ut_values, window, tretphase = ermittle_ut_werte(
+        flexions, ankle_heights, torsos, fps, frame_count
     )
 
     med_ut_flexion = np.median(ut_values) if ut_values else 0
+    bild_frame_idx = int(round(ut_frames[int(np.argmin(np.abs(np.asarray(ut_values) - med_ut_flexion)))]))
     med_torso = np.median(torsos[start_f:end_f]) if len(torsos) > end_f else 0
     med_elbow = np.median(elbows[start_f:end_f]) if len(elbows) > end_f else 0
     med_shoulder = np.median(shoulders[start_f:end_f]) if len(shoulders) > end_f else 0
@@ -272,7 +353,6 @@ def analysiere_video(video_pfad, dateiname, status_speicher, ergebnis_speicher, 
     def color_torso(val): return (50, 200, 50, 255) if 40 <= val <= 50 else (220, 200, 50, 255)
     def color_elbow(val): return (50, 200, 50, 255) if 15 <= val <= 30 else (220, 200, 50, 255)
 
-    max_knie = float("-inf")
     bester_frame = None
     frame_idx = 0
     while True:
@@ -295,15 +375,6 @@ def analysiere_video(video_pfad, dateiname, status_speicher, ergebnis_speicher, 
         if frames_data[frame_idx] is not None:
             xy, _ = frames_data[frame_idx]
             sh, el, wr, hi, kn, an = [xy[i] for i in idx]
-            schulter = (float(sh[0]), float(sh[1]))
-            ellbogen_punkt = (float(el[0]), float(el[1]))
-            hand = (float(wr[0]), float(wr[1]))
-            huefte = (float(hi[0]), float(hi[1]))
-            knie_punkt = (float(kn[0]), float(kn[1]))
-            fuss = (float(an[0]), float(an[1]))
-
-            knie = berechne_winkel(huefte, knie_punkt, fuss)
-
             pts = [sh, el, wr, hi, kn, an]
             
             lines = [
@@ -364,8 +435,7 @@ def analysiere_video(video_pfad, dateiname, status_speicher, ergebnis_speicher, 
         frame_pil = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)).convert('RGBA')
         combined = Image.alpha_composite(frame_pil, overlay)
         res_frame = cv2.cvtColor(np.array(combined), cv2.COLOR_RGBA2BGR)
-        if frames_data[frame_idx] is not None and knie > max_knie:
-            max_knie = knie
+        if frame_idx == bild_frame_idx:
             bester_frame = res_frame.copy()
         out.write(res_frame)
         frame_idx += 1
