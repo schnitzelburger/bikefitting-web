@@ -1,24 +1,12 @@
-from fastapi import FastAPI, UploadFile, File, Form, Request, BackgroundTasks
-from fastapi.responses import HTMLResponse
-from fastapi.staticfiles import StaticFiles
+from fastapi import FastAPI, UploadFile, File, Form, Request
+from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
-import os
-import bikefit
+import httpx
 
 app = FastAPI()
-
-os.makedirs("static/uploads", exist_ok=True)
-app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 
-status_speicher = {}
-ergebnis_speicher = {}
-
-def starte_analyse(dateiname: str, a_thigh: float, b_calf: float):
-    pfad = f"static/uploads/{dateiname}"
-    status_speicher[dateiname] = "Vorbereitung"
-    bikefit.analysiere_video(pfad, dateiname, status_speicher, ergebnis_speicher, a_thigh, b_calf)
-    status_speicher[dateiname] = "Fertig"
+WORKER_URL = "http://192.168.X.X:8000"
 
 @app.get("/", response_class=HTMLResponse)
 async def get_index(request: Request):
@@ -26,17 +14,14 @@ async def get_index(request: Request):
 
 @app.post("/upload", response_class=HTMLResponse)
 async def upload_video(
-    request: Request, 
-    background_tasks: BackgroundTasks, 
     video: UploadFile = File(...),
     oberschenkel: float = Form(...),
     unterschenkel: float = Form(...)
 ):
-    dateipfad = f"static/uploads/{video.filename}"
-    with open(dateipfad, "wb") as f:
-        f.write(await video.read())
-    
-    background_tasks.add_task(starte_analyse, video.filename, oberschenkel, unterschenkel)
+    async with httpx.AsyncClient() as client:
+        files = {"video": (video.filename, await video.read(), video.content_type)}
+        data = {"oberschenkel": oberschenkel, "unterschenkel": unterschenkel}
+        await client.post(f"{WORKER_URL}/analyze", files=files, data=data, timeout=60.0)
     
     return HTMLResponse(content=f'''
         <div id="analysestatus" hx-get="/status/{video.filename}" hx-trigger="every 2s" hx-swap="outerHTML">
@@ -46,16 +31,20 @@ async def upload_video(
 
 @app.get("/status/{dateiname}", response_class=HTMLResponse)
 async def get_status(dateiname: str):
-    status = status_speicher.get(dateiname, "Verarbeite")
+    async with httpx.AsyncClient() as client:
+        response = await client.get(f"{WORKER_URL}/status/{dateiname}")
+        data = response.json()
+        
+    status = data.get("status")
+    befund = data.get("befund")
     
     if status == "Fertig":
-        befund = ergebnis_speicher.get(dateiname, "Analyse abgeschlossen.")
         return HTMLResponse(content=f'''
             <div id="analysestatus">
                 <h3>Ergebnis</h3>
                 <p style="white-space: pre-wrap; font-weight: bold; background: #eee; padding: 15px; border-radius: 5px;">{befund}</p>
                 <video width="100%" controls>
-                    <source src="/static/uploads/out_{dateiname}" type="video/mp4">
+                    <source src="/video/{dateiname}" type="video/mp4">
                 </video>
             </div>
         ''')
@@ -65,3 +54,13 @@ async def get_status(dateiname: str):
             <p>Aktueller Status: {status}</p>
         </div>
     ''')
+
+@app.get("/video/{dateiname}")
+async def get_video(dateiname: str):
+    async def stream_video():
+        async with httpx.AsyncClient() as client:
+            async with client.stream("GET", f"{WORKER_URL}/video/{dateiname}") as response:
+                async for chunk in response.aiter_bytes():
+                    yield chunk
+                    
+    return StreamingResponse(stream_video(), media_type="video/mp4")
