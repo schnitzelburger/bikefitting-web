@@ -2,5 +2,8 @@ services:
   worker:
     container_name: bikefit-worker
     build: .
+    volumes:
+      - ./uploads:/app/uploads
+      - ./processed:/app/processed
     ports: ["8000:8000"]
     restart: always
