@@ -3,6 +3,8 @@ from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 import os
 import httpx
+import tempfile
+import asyncio
 
 app = FastAPI()
 templates = Jinja2Templates(directory="templates")
@@ -29,10 +31,16 @@ async def upload_video(
     oberschenkel: float = Form(...),
     unterschenkel: float = Form(...)
 ):
-    async with httpx.AsyncClient(timeout=60.0) as client:
-        files = {"video": (video.filename, await video.read(), video.content_type)}
-        data = {"oberschenkel": oberschenkel, "unterschenkel": unterschenkel}
-        await client.post(f"{WORKER_URL}/analyze", files=files, data=data, timeout=60.0)
+    with tempfile.NamedTemporaryFile() as upload_file:
+        while chunk := await video.read(1024 * 1024):
+            await asyncio.to_thread(upload_file.write, chunk)
+        upload_file.flush()
+        upload_file.seek(0)
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            files = {"video": (video.filename, upload_file, video.content_type)}
+            data = {"oberschenkel": oberschenkel, "unterschenkel": unterschenkel}
+            response = await client.post(f"{WORKER_URL}/analyze", files=files, data=data, timeout=60.0)
+            response.raise_for_status()
     
     return HTMLResponse(content=f'''
         <div id="analyse-container">
@@ -53,6 +61,17 @@ async def get_status(dateiname: str):
         
     status = data.get("status")
     befund = data.get("befund")
+    percent = data.get("prozent", 0.0)
+    frames = data.get("frames_analysiert", 0)
+    total_frames = data.get("gesamt_frames", 0)
+
+    if status == "Fehler":
+        return HTMLResponse(content=f'''
+            <div id="analysestatus">
+                <h3>Analyse fehlgeschlagen</h3>
+                <p>{befund}</p>
+            </div>
+        ''')
     
     if status == "Fertig":
         return HTMLResponse(content=f'''
@@ -76,6 +95,7 @@ async def get_status(dateiname: str):
     return HTMLResponse(content=f'''
         <div id="analysestatus" hx-get="/status/{dateiname}" hx-trigger="every 2s" hx-swap="outerHTML">
             <p>Aktueller Status: {status}</p>
+            <p>Fortschritt: {percent:.2f}% ({frames} von {total_frames} Frames)</p>
         </div>
     ''')
 

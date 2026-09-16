@@ -1,7 +1,9 @@
 services:
   worker:
     container_name: bikefit-worker
-    build: .
+    build:
+      context: ..
+      dockerfile: worker/dockerfile
     volumes:
       - ./uploads:/app/uploads
       - ./processed:/app/processed

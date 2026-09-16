@@ -23,19 +23,25 @@ async def task_verarbeiten(dateiname: str, a_thigh: float, b_calf: float):
     
     status_speicher[dateiname] = "Bearbeitung"
     
-    abgeschlossen = await asyncio.to_thread(
-        bikefit.analysiere_video,
-        in_pfad,
-        out_pfad,
-        status_speicher,
-        ergebnis_speicher,
-        a_thigh,
-        b_calf,
-        abbruch_signale,
-        fortschritt_speicher,
-    )
+    try:
+        abgeschlossen = await asyncio.to_thread(
+            bikefit.analysiere_video,
+            in_pfad,
+            out_pfad,
+            status_speicher,
+            ergebnis_speicher,
+            a_thigh,
+            b_calf,
+            abbruch_signale,
+            fortschritt_speicher,
+        )
+    except Exception as exc:
+        abgeschlossen = False
+        status_speicher[dateiname] = "Fehler"
+        ergebnis_speicher[dateiname] = f"Analyse fehlgeschlagen: {exc}"
     
-    status_speicher[dateiname] = "Fertig" if abgeschlossen else "Abgebrochen"
+    if status_speicher.get(dateiname) != "Fehler":
+        status_speicher[dateiname] = "Fertig" if abgeschlossen else "Abgebrochen"
     
     if os.path.exists(in_pfad):
         os.remove(in_pfad)
@@ -66,7 +72,7 @@ async def analyze_video(
     }
     with open(ziel, "wb") as f:
         while chunk := await video.read(1024 * 1024):
-            f.write(chunk)
+            await asyncio.to_thread(f.write, chunk)
     
     background_tasks.add_task(task_verarbeiten, video.filename, oberschenkel, unterschenkel)
     return {"filename": video.filename, "message": "Start"}
