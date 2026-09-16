@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bikefit Analyse</title>
+    <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+    <style>
+        body { font-family: sans-serif; padding: 2rem; max-width: 600px; margin: auto; }
+        #ladeanzeige { display: none; color: #666; margin-top: 1rem; }
+        .htmx-request #ladeanzeige { display: block; }
+        .htmx-request button { display: none; }
+    </style>
+</head>
+<body>
+    <h1>Rennrad Sitzposition messen</h1>
+    <p>Lade dein Video von der Seite hoch.</p>
+    
+    <form hx-post="/upload" hx-encoding="multipart/form-data" hx-target="#ergebnis">
+        <input type="file" name="video" accept="video/*" required>
+        <button type="submit">Video analysieren</button>
+        <div id="ladeanzeige">
+            <p>Bitte warten. Die Analyse laeuft und kann ein paar Minuten dauern.</p>
+        </div>
+    </form>
+    
+    <div id="ergebnis" style="margin-top: 2rem;"></div>
+</body>
+</html>
