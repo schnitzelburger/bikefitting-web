@@ -60,10 +60,30 @@ async def get_status(dateiname: str):
                 </video>
             </div>
         ''')
+
+    if status in {"Abgebrochen", "Abbruch angefordert"}:
+        return HTMLResponse(content=f'''
+            <div id="analysestatus">
+                <p>Analyse wurde abgebrochen.</p>
+            </div>
+        ''')
         
     return HTMLResponse(content=f'''
         <div id="analysestatus" hx-get="/status/{dateiname}" hx-trigger="every 2s" hx-swap="outerHTML">
             <p>Aktueller Status: {status}</p>
+            <button type="button" hx-post="/cancel/{dateiname}" hx-target="#analysestatus" hx-swap="outerHTML">Analyse abbrechen</button>
+        </div>
+    ''')
+
+@app.post("/cancel/{dateiname}", response_class=HTMLResponse)
+async def cancel_video(dateiname: str):
+    async with httpx.AsyncClient() as client:
+        response = await client.post(f"{WORKER_URL}/cancel/{dateiname}", timeout=10.0)
+        response.raise_for_status()
+
+    return HTMLResponse(content=f'''
+        <div id="analysestatus">
+            <p>Abbruch angefordert. Die laufende Verarbeitung wird beendet.</p>
         </div>
     ''')
 

@@ -10,6 +10,7 @@ os.makedirs("processed", exist_ok=True)
 
 status_speicher = {}
 ergebnis_speicher = {}
+abbruch_signale = {}
 
 @app.get("/health")
 async def health_check():
@@ -21,9 +22,18 @@ async def task_verarbeiten(dateiname: str, a_thigh: float, b_calf: float):
     
     status_speicher[dateiname] = "Bearbeitung"
     
-    bikefit.analysiere_video(in_pfad, out_pfad, status_speicher, ergebnis_speicher, a_thigh, b_calf)
+    abgeschlossen = await asyncio.to_thread(
+        bikefit.analysiere_video,
+        in_pfad,
+        out_pfad,
+        status_speicher,
+        ergebnis_speicher,
+        a_thigh,
+        b_calf,
+        abbruch_signale,
+    )
     
-    status_speicher[dateiname] = "Fertig"
+    status_speicher[dateiname] = "Fertig" if abgeschlossen else "Abgebrochen"
     
     if os.path.exists(in_pfad):
         os.remove(in_pfad)
@@ -35,6 +45,7 @@ async def task_verarbeiten(dateiname: str, a_thigh: float, b_calf: float):
     
     status_speicher.pop(dateiname, None)
     ergebnis_speicher.pop(dateiname, None)
+    abbruch_signale.pop(dateiname, None)
 
 @app.post("/analyze")
 async def analyze_video(
@@ -44,11 +55,22 @@ async def analyze_video(
     unterschenkel: float = Form(...)
 ):
     ziel = f"uploads/{video.filename}"
+    abbruch_signale[video.filename] = False
     with open(ziel, "wb") as f:
-        f.write(await video.read())
+        while chunk := await video.read(1024 * 1024):
+            f.write(chunk)
     
     background_tasks.add_task(task_verarbeiten, video.filename, oberschenkel, unterschenkel)
     return {"filename": video.filename, "message": "Start"}
+
+@app.post("/cancel/{dateiname}")
+async def cancel_video(dateiname: str):
+    if dateiname not in abbruch_signale:
+        return JSONResponse(status_code=404, content={"message": "Analyse nicht gefunden"})
+
+    abbruch_signale[dateiname] = True
+    status_speicher[dateiname] = "Abbruch angefordert"
+    return {"filename": dateiname, "message": "Abbruch angefordert"}
 
 @app.get("/status/{dateiname}")
 async def get_status(dateiname: str):

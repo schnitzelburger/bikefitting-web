@@ -2,6 +2,7 @@ import cv2
 import os
 import math
 import subprocess
+import time
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 from ultralytics import YOLO
@@ -31,7 +32,10 @@ def interpolate_nones(arr):
             else: arr[i] = 0.0
     return arr
 
-def analysiere_video(video_pfad, dateiname, status_speicher, ergebnis_speicher, a_thigh, b_calf):
+def analysiere_video(video_pfad, dateiname, status_speicher, ergebnis_speicher, a_thigh, b_calf, abbruch_signale):
+    job_name = os.path.basename(dateiname)
+    if job_name.startswith("out_"):
+        job_name = job_name[4:]
     target_flexion = 35.0
 
     gamma_rad = math.radians(180.0 - target_flexion)
@@ -39,7 +43,7 @@ def analysiere_video(video_pfad, dateiname, status_speicher, ergebnis_speicher, 
     dc_dgamma_rad = (a_thigh * b_calf * math.sin(gamma_rad)) / c_val
     mm_per_degree = dc_dgamma_rad * (math.pi / 180.0)
 
-    status_speicher[dateiname] = "Lade Modell und suche Koerperpunkte..."
+    status_speicher[job_name] = "Lade Modell und suche Koerperpunkte..."
     model = YOLO("yolo11x-pose.pt")
     cap = cv2.VideoCapture(video_pfad)
     fps = cap.get(cv2.CAP_PROP_FPS)
@@ -50,15 +54,27 @@ def analysiere_video(video_pfad, dateiname, status_speicher, ergebnis_speicher, 
 
     frames_data = []
     left_confs, right_confs = [], []
+    letzter_log = time.monotonic()
+    print(f"Analyse {dateiname}: 0.0% (0/{frame_count} Frames)", flush=True)
 
     count = 0
     while True:
+        if abbruch_signale.get(job_name, False):
+            cap.release()
+            status_speicher[job_name] = "Abgebrochen"
+            return False
+
         ret, frame = cap.read()
         if not ret: break
         
         if count % 10 == 0:
-            status_speicher[dateiname] = f"Lese Positionen Bild {count} von {frame_count}"
+            status_speicher[job_name] = f"Lese Positionen Bild {count} von {frame_count}"
         count += 1
+
+        if time.monotonic() - letzter_log >= 3:
+            fortschritt = count / frame_count * 100 if frame_count else 0
+            print(f"Analyse {dateiname}: {fortschritt:.1f}% ({count}/{frame_count} Frames)", flush=True)
+            letzter_log = time.monotonic()
         
         results = model(frame, verbose=False)
         if len(results) == 0 or len(results[0].keypoints) == 0:
@@ -75,7 +91,7 @@ def analysiere_video(video_pfad, dateiname, status_speicher, ergebnis_speicher, 
 
     cap.release()
 
-    status_speicher[dateiname] = "Berechne Winkel und Totpunkte..."
+    status_speicher[job_name] = "Berechne Winkel und Totpunkte..."
     side_is_left = np.mean(left_confs) > np.mean(right_confs)
     idx = [5,7,9,11,13,15] if side_is_left else [6,8,10,12,14,16]
 
@@ -136,10 +152,10 @@ def analysiere_video(video_pfad, dateiname, status_speicher, ergebnis_speicher, 
     diff = med_ut_flexion - target_flexion
     adjustment_mm = diff * mm_per_degree
 
-    status_speicher[dateiname] = "Erstelle Video..."
+    status_speicher[job_name] = "Erstelle Video..."
     cap = cv2.VideoCapture(video_pfad)
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-    temp_out = f"static/uploads/temp_{dateiname}"
+    temp_out = f"{dateiname}.tmp.mp4"
     out = cv2.VideoWriter(temp_out, fourcc, fps, (width, height))
 
     def get_font(size):
@@ -159,6 +175,13 @@ def analysiere_video(video_pfad, dateiname, status_speicher, ergebnis_speicher, 
     bester_frame = None
     frame_idx = 0
     while True:
+        if abbruch_signale.get(job_name, False):
+            cap.release()
+            out.release()
+            if os.path.exists(temp_out): os.remove(temp_out)
+            status_speicher[job_name] = "Abgebrochen"
+            return False
+
         ret, frame = cap.read()
         if not ret: break
             
@@ -245,13 +268,14 @@ def analysiere_video(video_pfad, dateiname, status_speicher, ergebnis_speicher, 
     out.release()
     cap.release()
 
-    status_speicher[dateiname] = "Kodiere fuer Browser..."
-    final_out = f"static/uploads/out_{dateiname}"
+    status_speicher[job_name] = "Kodiere fuer Browser..."
+    final_out = dateiname
     subprocess.run(["ffmpeg", "-y", "-i", temp_out, "-c:v", "libx264", "-pix_fmt", "yuv420p", final_out], capture_output=True)
     if os.path.exists(temp_out): os.remove(temp_out)
 
     if bester_frame is not None:
-        bild_pfad = final_out.replace(".mp4", ".jpg").replace("out_", "bild_")
+        bild_pfad = os.path.join(os.path.dirname(final_out), f"bild_{job_name}")
+        bild_pfad = os.path.splitext(bild_pfad)[0] + ".jpg"
         cv2.imwrite(bild_pfad, bester_frame)
 
     if 27.5 <= med_ut_flexion <= 42.5:
@@ -261,4 +285,5 @@ def analysiere_video(video_pfad, dateiname, status_speicher, ergebnis_speicher, 
         befund = f"Dein Kniewinkel betraegt {med_ut_flexion:.1f} Grad.\nDu solltest deinen Sattel um {abs(adjustment_mm):.0f} mm {richtung} verstellen."
     
     befund += f"\n\nHaltung Rumpf liegt bei {med_torso:.1f} Grad, Ellbogen bei {med_elbow:.1f} Grad."
-    ergebnis_speicher[dateiname] = befund
+    ergebnis_speicher[job_name] = befund
+    return True
