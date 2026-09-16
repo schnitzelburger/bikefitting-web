@@ -302,13 +302,7 @@ def analysiere_video(video_pfad, dateiname, status_speicher, ergebnis_speicher, 
             knie_punkt = (float(kn[0]), float(kn[1]))
             fuss = (float(an[0]), float(an[1]))
 
-            rumpf = berechne_winkel(schulter, huefte, (huefte[0], huefte[1] - 100))
-            ellbogen = berechne_winkel(schulter, ellbogen_punkt, hand)
             knie = berechne_winkel(huefte, knie_punkt, fuss)
-
-            if knie > max_knie:
-                max_knie = knie
-                bester_frame = frame.copy()
 
             pts = [sh, el, wr, hi, kn, an]
             
@@ -325,8 +319,6 @@ def analysiere_video(video_pfad, dateiname, status_speicher, ergebnis_speicher, 
                 
             for p in pts:
                 draw.ellipse([p[0]-8*scale, p[1]-8*scale, p[0]+8*scale, p[1]+8*scale], fill=(255,255,255,255), outline=(0,0,0,255), width=int(2*scale))
-            draw.text((10 * scale, 10 * scale), f"Rumpf: {int(rumpf)}", font=font_med, fill=(50, 220, 50, 255))
-            draw.text((10 * scale, 55 * scale), f"Ellbogen: {int(ellbogen)}", font=font_med, fill=(50, 220, 50, 255))
             radius = 65 * scale
             draw.arc([kn[0] - radius, kn[1] - radius, kn[0] + radius, kn[1] + radius], 205, 330, fill=color_knee(flexions[frame_idx]), width=max(2, int(5 * scale)))
             draw.text((kn[0] + 30 * scale, kn[1] - 20 * scale), f"{flexions[frame_idx]:.1f} live", font=font_num, fill=(255,255,255,255))
@@ -372,6 +364,9 @@ def analysiere_video(video_pfad, dateiname, status_speicher, ergebnis_speicher, 
         frame_pil = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)).convert('RGBA')
         combined = Image.alpha_composite(frame_pil, overlay)
         res_frame = cv2.cvtColor(np.array(combined), cv2.COLOR_RGBA2BGR)
+        if frames_data[frame_idx] is not None and knie > max_knie:
+            max_knie = knie
+            bester_frame = res_frame.copy()
         out.write(res_frame)
         frame_idx += 1
 

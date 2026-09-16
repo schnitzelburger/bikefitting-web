@@ -45,7 +45,8 @@ async def upload_video(
     return HTMLResponse(content=f'''
         <div id="analyse-container">
             <div id="analysestatus" hx-get="/status/{video.filename}" hx-trigger="every 2s" hx-swap="outerHTML">
-                <p>Analyse gestartet. Bitte warten...</p>
+                <p class="analyse-status-text">Analyse wird vorbereitet...</p>
+                <progress class="analyse-progress" value="0" max="100"></progress>
             </div>
             <button type="button" hx-post="/cancel/{video.filename}" hx-target="#analyse-container" hx-swap="outerHTML">
                 Analyse abbrechen
@@ -78,10 +79,18 @@ async def get_status(dateiname: str):
             <div id="analysestatus">
                 <h3>Ergebnis</h3>
                 <p style="white-space: pre-wrap; font-weight: bold; background: #eee; padding: 15px; border-radius: 5px;">{befund}</p>
-                <img src="/image/{dateiname}" width="100%">
-                <video width="100%" controls>
-                    <source src="/video/{dateiname}" type="video/mp4">
-                </video>
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1rem; align-items: start;">
+                    <div>
+                        <h4>Totpunktbild</h4>
+                        <img src="/image/{dateiname}" style="display: block; width: 100%; height: auto;" alt="Totpunktbild der Bikefit-Analyse">
+                    </div>
+                    <div>
+                        <h4>Analysiertes Video</h4>
+                        <video style="display: block; width: 100%; height: auto;" controls>
+                            <source src="/video/{dateiname}" type="video/mp4">
+                        </video>
+                    </div>
+                </div>
             </div>
         ''')
 
@@ -94,8 +103,8 @@ async def get_status(dateiname: str):
         
     return HTMLResponse(content=f'''
         <div id="analysestatus" hx-get="/status/{dateiname}" hx-trigger="every 2s" hx-swap="outerHTML">
-            <p>Aktueller Status: {status}</p>
-            <p>Fortschritt: {percent:.2f}% ({frames} von {total_frames} Frames)</p>
+            <p class="analyse-status-text">Verarbeite Frame {frames} von {total_frames} ({percent:.2f} %)</p>
+            <progress class="analyse-progress" value="{percent}" max="100"></progress>
         </div>
     ''')
 
