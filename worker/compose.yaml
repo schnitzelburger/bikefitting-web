@@ -1,5 +1,6 @@
 services:
   worker:
+    container_name: bikefit-worker
     build: .
     ports: ["8000:8000"]
     restart: always
