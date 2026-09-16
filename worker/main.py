@@ -55,3 +55,7 @@ async def get_status(dateiname: str):
 @app.get("/video/{dateiname}")
 async def get_video(dateiname: str):
     return FileResponse(f"processed/out_{dateiname}")
+
+@app.get("/image/{dateiname}")
+async def get_image(dateiname: str):
+    return FileResponse(f"processed/bild_{dateiname}.jpg")

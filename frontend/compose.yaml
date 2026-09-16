@@ -4,3 +4,9 @@ services:
     build: .
     ports: ["8082:8082"]
     restart: always
+    env_file: .env
+
+networks:
+  default: # automatically set this as default network for all services in this file
+    external: true
+    name: swag-network

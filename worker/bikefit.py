@@ -6,6 +6,10 @@ import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 from ultralytics import YOLO
 
+def berechne_winkel(p1, p2, p3):
+    wert = math.degrees(math.atan2(p3[1] - p2[1], p3[0] - p2[0]) - math.atan2(p1[1] - p2[1], p1[0] - p2[0]))
+    return abs(wert) % 360
+
 def get_angle(a, b, c):
     ba = a - b
     bc = c - b
@@ -151,6 +155,8 @@ def analysiere_video(video_pfad, dateiname, status_speicher, ergebnis_speicher, 
     def color_torso(val): return (50, 200, 50, 255) if 40 <= val <= 50 else (220, 200, 50, 255)
     def color_elbow(val): return (50, 200, 50, 255) if 15 <= val <= 30 else (220, 200, 50, 255)
 
+    max_knie = float("-inf")
+    bester_frame = None
     frame_idx = 0
     while True:
         ret, frame = cap.read()
@@ -165,6 +171,26 @@ def analysiere_video(video_pfad, dateiname, status_speicher, ergebnis_speicher, 
         if frames_data[frame_idx] is not None:
             xy, _ = frames_data[frame_idx]
             sh, el, wr, hi, kn, an = [xy[i] for i in idx]
+            schulter = (float(sh[0]), float(sh[1]))
+            ellbogen_punkt = (float(el[0]), float(el[1]))
+            hand = (float(wr[0]), float(wr[1]))
+            huefte = (float(hi[0]), float(hi[1]))
+            knie_punkt = (float(kn[0]), float(kn[1]))
+            fuss = (float(an[0]), float(an[1]))
+
+            rumpf = berechne_winkel(schulter, huefte, (huefte[0], huefte[1] - 100))
+            ellbogen = berechne_winkel(schulter, ellbogen_punkt, hand)
+            knie = berechne_winkel(huefte, knie_punkt, fuss)
+
+            cv2.putText(frame, f"Rumpf: {int(rumpf)}", (10, 50),
+                        cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+            cv2.putText(frame, f"Ellbogen: {int(ellbogen)}", (10, 90),
+                        cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+
+            if knie > max_knie:
+                max_knie = knie
+                bester_frame = frame.copy()
+
             pts = [sh, el, wr, hi, kn, an]
             
             lines = [
@@ -223,6 +249,10 @@ def analysiere_video(video_pfad, dateiname, status_speicher, ergebnis_speicher, 
     final_out = f"static/uploads/out_{dateiname}"
     subprocess.run(["ffmpeg", "-y", "-i", temp_out, "-c:v", "libx264", "-pix_fmt", "yuv420p", final_out], capture_output=True)
     if os.path.exists(temp_out): os.remove(temp_out)
+
+    if bester_frame is not None:
+        bild_pfad = final_out.replace(".mp4", ".jpg").replace("out_", "bild_")
+        cv2.imwrite(bild_pfad, bester_frame)
 
     if 27.5 <= med_ut_flexion <= 42.5:
         befund = f"Deine Sattelhoehe liegt mit {med_ut_flexion:.1f} Grad Beugung im perfekten Bereich."

@@ -6,3 +6,4 @@ venv/
 static/uploads/
 .DS_Store
 *.pt
+.env
