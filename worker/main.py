@@ -11,6 +11,10 @@ os.makedirs("processed", exist_ok=True)
 status_speicher = {}
 ergebnis_speicher = {}
 
+@app.get("/health")
+async def health_check():
+    return {"status": "online"}
+
 async def task_verarbeiten(dateiname: str, a_thigh: float, b_calf: float):
     in_pfad = f"uploads/{dateiname}"
     out_pfad = f"processed/out_{dateiname}"

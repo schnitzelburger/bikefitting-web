@@ -13,13 +13,23 @@ WORKER_URL = os.getenv("WORKER_URL", "http://192.168.178.50:8000")
 async def get_index(request: Request):
     return templates.TemplateResponse(request=request, name="index.html")
 
+@app.get("/worker-status", response_class=HTMLResponse)
+async def get_worker_status():
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(f"{WORKER_URL}/health", timeout=3.0)
+            response.raise_for_status()
+        return HTMLResponse(content='<div class="worker-status online"><span class="status-dot"></span><span>Worker online</span></div>')
+    except (httpx.HTTPError, OSError):
+        return HTMLResponse(content='<div class="worker-status offline"><span class="status-dot"></span><span>Worker offline</span></div>')
+
 @app.post("/upload", response_class=HTMLResponse)
 async def upload_video(
     video: UploadFile = File(...),
     oberschenkel: float = Form(...),
     unterschenkel: float = Form(...)
 ):
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=60.0) as client:
         files = {"video": (video.filename, await video.read(), video.content_type)}
         data = {"oberschenkel": oberschenkel, "unterschenkel": unterschenkel}
         await client.post(f"{WORKER_URL}/analyze", files=files, data=data, timeout=60.0)
