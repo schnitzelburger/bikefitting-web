@@ -6,8 +6,8 @@
     <title>Bikefit Analyse</title>
     <script src="https://unpkg.com/htmx.org@1.9.12"></script>
     <style>
-        body { font-family: sans-serif; padding: 2rem; max-width: 600px; margin: auto; }
-        .worker-status { display: inline-flex; align-items: center; gap: .5rem; padding: .5rem .75rem; border-radius: 999px; font-size: .9rem; margin-bottom: 1rem; }
+        body { font-family: sans-serif; padding: 2rem; max-width: 800px; margin: auto; }
+        .worker-status { position: fixed; top: 1rem; right: 1rem; z-index: 10; display: inline-flex; align-items: center; gap: .5rem; padding: .5rem .75rem; border-radius: 999px; font-size: .9rem; }
         .worker-status.online { color: #166534; background: #dcfce7; }
         .worker-status.offline { color: #991b1b; background: #fee2e2; }
         .worker-status.checking { color: #854d0e; background: #fef9c3; }
@@ -26,12 +26,12 @@
     </style>
 </head>
 <body>
+    <h1>Rennrad Sitzposition messen</h1>
     <div id="worker-status" class="worker-status checking"
          hx-get="/worker-status" hx-trigger="load, every 10s" hx-swap="outerHTML">
         <span class="status-dot"></span>
         <span>Worker wird geprüft...</span>
     </div>
-    <h1>Rennrad Sitzposition messen</h1>
     <h2>Analysiere deine Sitzposition mit Hilfe von Videoanalyse.</h2>
     <p class="upload-hint">Bitte lade ein Video hoch, in dem du von der Seite auf dem Fahrrad zu sehen bist. Achte darauf, dass die Kamera auf Höhe des Knies positioniert ist und das gesamte Bein sichtbar ist.</p>
     

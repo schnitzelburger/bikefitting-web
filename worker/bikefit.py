@@ -42,22 +42,31 @@ def parabel_scheitelpunkt(values, center, window_width):
     return vertex, float(np.polyval(coefficients, vertex))
 
 def ermittle_tretphase(ankle_heights, torso_angles, fps, frame_count):
-    """Erkennt nur eine zusammenhaengende Phase mit regelmaessigem Treten."""
+    """Erkennt eine aktive Tretphase aus der vertikalen Knöchelbewegung.
+
+    OpenCV liefert Bildkoordinaten mit wachsendem y nach unten. Der untere
+    Totpunkt ist deshalb ein lokales Maximum der Knöchel-y-Koordinate.
+    """
     start = int(fps)
     end = frame_count - int(fps)
-    smoothed = np.convolve(ankle_heights, np.ones(5) / 5, mode="same")
+    smooth_window = max(3, int(round(fps * 0.08)))
+    if smooth_window % 2 == 0:
+        smooth_window += 1
+    smoothed = np.convolve(
+        ankle_heights, np.ones(smooth_window) / smooth_window, mode="same"
+    )
     minima = []
     minimum_distance = max(2, int(fps / 3))
     for index in range(start + 1, end - 1):
-        if smoothed[index] <= smoothed[index - 1] and smoothed[index] < smoothed[index + 1]:
+        if smoothed[index] >= smoothed[index - 1] and smoothed[index] > smoothed[index + 1]:
             if not minima or index - minima[-1] >= minimum_distance:
                 minima.append(index)
-    if len(minima) < 3:
-        raise ValueError("Keine ausreichende Knoechelschwingung fuer Trittzyklen erkannt.")
+    if len(minima) < 2:
+        return None
 
     periods = np.diff(minima)
     period_median = float(np.median(periods))
-    regular = np.abs(periods - period_median) <= max(2.0, period_median * 0.25)
+    regular = np.abs(periods - period_median) <= max(3.0, period_median * 0.40)
     groups = []
     group_start = None
     for index, is_regular in enumerate(regular):
@@ -69,7 +78,7 @@ def ermittle_tretphase(ankle_heights, torso_angles, fps, frame_count):
                 groups.append((group_start, group_end + 1))
             group_start = None
     if not groups:
-        raise ValueError("Keine regelmaessige Tretphase erkannt.")
+        return None
 
     best_group = max(groups, key=lambda item: item[1] - item[0])
     first_minimum = minima[best_group[0]]
@@ -84,7 +93,8 @@ def ermittle_tretphase(ankle_heights, torso_angles, fps, frame_count):
     for index in range(phase_start, phase_end - stationary_window + 1):
         ankle_range = np.ptp(smoothed[index:index + stationary_window])
         torso_range = np.ptp(torso_angles[index:index + stationary_window])
-        if ankle_range <= ankle_motion_limit and torso_range <= 2.0:
+        torso_limit = max(2.0, float(np.ptp(torso_angles[phase_start:phase_end])) * 0.10)
+        if ankle_range <= ankle_motion_limit and torso_range <= torso_limit:
             stationary[index:index + stationary_window] = True
     active_start = phase_start
     active_end = phase_end
@@ -93,31 +103,69 @@ def ermittle_tretphase(ankle_heights, torso_angles, fps, frame_count):
     while active_end > active_start and stationary[active_end - 1]:
         active_end -= 1
     if active_end - active_start < int(period_median * 1.5):
-        raise ValueError("Die erkannte Tretphase ist zu kurz oder stationaer.")
+        return None
 
     phase_minima = [minimum for minimum in minima if active_start <= minimum <= active_end]
     if len(phase_minima) < 2:
-        raise ValueError("Keine gueltigen Trittzyklen innerhalb der aktiven Phase erkannt.")
+        return None
     return active_start, active_end, phase_minima, smoothed, stationary
 
 
 def ermittle_ut_werte(flexions, ankle_heights, torso_angles, fps, frame_count):
-    phase_start, phase_end, minima, smoothed_ankles, stationary = ermittle_tretphase(
+    phase = ermittle_tretphase(
         ankle_heights, torso_angles, fps, frame_count
     )
+    if phase is None:
+        phase_start, phase_end = 0, frame_count
+        minima = []
+        smooth_window = max(3, int(round(fps * 0.08)))
+        if smooth_window % 2 == 0:
+            smooth_window += 1
+        smoothed_ankles = np.convolve(
+            ankle_heights,
+            np.ones(smooth_window) / smooth_window,
+            mode="same",
+        )
+        stationary = np.zeros(frame_count, dtype=bool)
+        stationary_window = max(2, int(round(fps * 0.5)))
+        ankle_amplitude = float(np.ptp(smoothed_ankles))
+        ankle_motion_limit = max(2.0, ankle_amplitude * 0.08)
+        torso_limit = max(2.0, float(np.ptp(torso_angles)) * 0.10)
+        for index in range(0, max(0, frame_count - stationary_window + 1)):
+            if (
+                np.ptp(smoothed_ankles[index:index + stationary_window]) <= ankle_motion_limit
+                and np.ptp(torso_angles[index:index + stationary_window]) <= torso_limit
+            ):
+                stationary[index:index + stationary_window] = True
+        phase_uncertain = True
+    else:
+        phase_start, phase_end, minima, smoothed_ankles, stationary = phase
+        phase_uncertain = False
+
+    if len(minima) < 4:
+        # Relaxed fallback: use knee-extension minima only after the active
+        # phase detector failed to provide at least three complete cycles.
+        minimum_distance = max(2, int(fps / 4))
+        for index in range(phase_start + 1, phase_end - 1):
+            if flexions[index] <= flexions[index - 1] and flexions[index] < flexions[index + 1]:
+                if not minima or index - minima[-1] >= minimum_distance:
+                    minima.append(index)
+        phase_uncertain = True
+    if len(minima) < 2:
+        return [], [], max(3, int(fps / 4)), (phase_start, phase_end), True
+
     cycle_lengths = np.diff(minima)
     cycle_width = max(3, int(round(float(np.median(cycle_lengths)) / 4.0)))
-    cycle_mean_height = float(np.mean(smoothed_ankles[phase_start:phase_end]))
-    cycle_amplitude = float(np.ptp(smoothed_ankles[phase_start:phase_end]))
-    ground_limit = cycle_mean_height + max(3.0, cycle_amplitude * 0.35)
     frames, values = [], []
     for cycle_start, cycle_end in zip(minima[:-1], minima[1:]):
         candidate_start = max(phase_start, cycle_start)
         candidate_end = min(phase_end, cycle_end + 1)
         local = candidate_start + int(np.argmin(flexions[candidate_start:candidate_end]))
-        if local >= len(smoothed_ankles) or stationary[local] or smoothed_ankles[local] > ground_limit:
+        if local >= len(smoothed_ankles) or stationary[local]:
             continue
-        if np.ptp(smoothed_ankles[max(phase_start, local - int(fps * 0.25)):min(phase_end, local + int(fps * 0.25) + 1)]) <= 2.0:
+        local_start = max(phase_start, local - int(fps * 0.25))
+        local_end = min(phase_end, local + int(fps * 0.25) + 1)
+        if np.ptp(smoothed_ankles[local_start:local_end]) <= max(2.0, np.ptp(smoothed_ankles[phase_start:phase_end]) * 0.08):
             continue
         vertex, value = parabel_scheitelpunkt(flexions, local, cycle_width)
         if vertex < phase_start or vertex >= phase_end:
@@ -125,8 +173,15 @@ def ermittle_ut_werte(flexions, ankle_heights, torso_angles, fps, frame_count):
         frames.append(vertex)
         values.append(value)
     if not values:
-        raise ValueError("Keine gueltigen unteren Totpunkte in der Tretphase erkannt.")
-    return frames, values, cycle_width, (phase_start, phase_end)
+        print("UT-Zyklen roh: keine gueltigen Kandidaten", flush=True)
+        return [], [], cycle_width, (phase_start, phase_end), True
+    print(
+        "UT-Zyklen roh: " + ", ".join(
+            f"Frame {frame:.1f}: {value:.2f} Grad" for frame, value in zip(frames, values)
+        ),
+        flush=True,
+    )
+    return frames, values, cycle_width, (phase_start, phase_end), phase_uncertain
 
 def test_messkette():
     huefthoehe = berechne_huefthoehe(172.5, 430.0, 440.0, TARGET_FLEXION)
@@ -138,7 +193,7 @@ def test_messkette():
         flexion = TARGET_FLEXION + 0.08 * rng.normal(size=len(frames))
         ankle = 20.0 * np.sin(2 * math.pi * frames / 60 + phase)
         torso = np.zeros(len(frames))
-        _, values, _, _ = ermittle_ut_werte(flexion, ankle, torso, 60.0, len(frames))
+        _, values, _, _, _ = ermittle_ut_werte(flexion, ankle, torso, 60.0, len(frames))
         errors.extend(abs(value - TARGET_FLEXION) for value in values)
     assert float(np.mean(errors)) < 0.5
 
@@ -148,7 +203,7 @@ def test_messkette():
     ankle = 20.0 * np.sin(2 * math.pi * frames / 60.0)
     ankle[540:] = 100.0
     torso = np.zeros(len(frames))
-    ut_frames, values, _, phase = ermittle_ut_werte(
+    ut_frames, values, _, phase, uncertain = ermittle_ut_werte(
         flexion, ankle, torso, 60.0, len(frames)
     )
     assert values
@@ -303,12 +358,17 @@ def analysiere_video(video_pfad, dateiname, status_speicher, ergebnis_speicher, 
     start_f = int(fps)
     end_f = frame_count - int(fps)
     
-    ut_frames, ut_values, window, tretphase = ermittle_ut_werte(
+    ut_frames, ut_values, window, tretphase, unsicher = ermittle_ut_werte(
         flexions, ankle_heights, torsos, fps, frame_count
     )
 
-    med_ut_flexion = np.median(ut_values) if ut_values else 0
-    bild_frame_idx = int(round(ut_frames[int(np.argmin(np.abs(np.asarray(ut_values) - med_ut_flexion)))]))
+    if ut_values:
+        med_ut_flexion = float(np.median(ut_values))
+        bild_frame_idx = int(round(ut_frames[int(np.argmin(np.abs(np.asarray(ut_values) - med_ut_flexion)))]))
+    else:
+        med_ut_flexion = float(np.median(flexions[start_f:end_f])) if end_f > start_f else TARGET_FLEXION
+        bild_frame_idx = int(start_f + np.argmin(flexions[start_f:end_f])) if end_f > start_f else 0
+        unsicher = True
     med_torso = np.median(torsos[start_f:end_f]) if len(torsos) > end_f else 0
     med_elbow = np.median(elbows[start_f:end_f]) if len(elbows) > end_f else 0
     med_shoulder = np.median(shoulders[start_f:end_f]) if len(shoulders) > end_f else 0
@@ -341,6 +401,7 @@ def analysiere_video(video_pfad, dateiname, status_speicher, ergebnis_speicher, 
     font_med = get_font(35 * scale)
     font_num = get_font(30 * scale, numeric=True)
     font_sml = get_font(20 * scale)
+    warnung = "WARNUNG: UT unsicher" if unsicher else ""
 
     def color_knee(val):
         if 30 <= val <= 40: return (50, 200, 50, 255)
@@ -372,6 +433,8 @@ def analysiere_video(video_pfad, dateiname, status_speicher, ergebnis_speicher, 
         
         draw.rectangle([0, 0, width, 100 * scale], fill=(20, 20, 20, 220))
         draw.text((20 * scale, 10 * scale), "BIKEFIT", font=font_big, fill=(255,255,255,255))
+        if warnung:
+            draw.text((width - 360 * scale, 20 * scale), warnung, font=font_sml, fill=(255, 210, 50, 255))
         
         if frames_data[frame_idx] is not None:
             xy, _ = frames_data[frame_idx]
