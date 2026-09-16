@@ -5,6 +5,8 @@ import os
 import httpx
 import tempfile
 import asyncio
+import html
+import re
 
 app = FastAPI()
 templates = Jinja2Templates(directory="templates")
@@ -48,10 +50,10 @@ async def upload_video(
                 <p class="analyse-status-text">Analyse wird vorbereitet...</p>
                 <progress class="analyse-progress" value="0" max="100"></progress>
             </div>
-            <button type="button" hx-post="/cancel/{video.filename}" hx-target="#analyse-container" hx-swap="outerHTML">
-                Analyse abbrechen
-            </button>
         </div>
+        <button id="abbrechen-button" type="button"
+            hx-post="/cancel/{video.filename}" hx-target="#analyse-container" hx-swap="outerHTML"
+                hx-swap-oob="true">Analyse abbrechen</button>
     ''')
 
 @app.get("/status/{dateiname}", response_class=HTMLResponse)
@@ -72,13 +74,31 @@ async def get_status(dateiname: str):
                 <h3>Analyse fehlgeschlagen</h3>
                 <p>{befund}</p>
             </div>
+            <button id="abbrechen-button" type="button" disabled hx-swap-oob="true">Analyse nicht verfügbar</button>
         ''')
     
     if status == "Fertig":
+        rumpf = re.search(r"Rumpf liegt bei ([0-9.]+) Grad", befund or "")
+        ellbogen = re.search(r"Ellbogen bei ([0-9.]+) Grad", befund or "")
+        schulter = re.search(r"Schulterwinkel: ([0-9.]+) Grad", befund or "")
+        huefte = re.search(r"Hueftwinkel: ([0-9.]+) Grad", befund or "")
+        messwerte = {
+            "Haltung des Rumpfs": rumpf.group(1) if rumpf else "-",
+            "Ellbogen": ellbogen.group(1) if ellbogen else "-",
+            "Schulterwinkel": schulter.group(1) if schulter else "-",
+            "Hüftwinkel": huefte.group(1) if huefte else "-",
+        }
+        messwerte_html = "".join(
+            f'<div><strong>{html.escape(name)}</strong>: {html.escape(value)} Grad</div>'
+            for name, value in messwerte.items()
+        )
+        empfehlung = re.split(r"\n\nHaltung", befund or "", maxsplit=1)[0]
         return HTMLResponse(content=f'''
             <div id="analysestatus">
                 <h3>Ergebnis</h3>
-                <p style="white-space: pre-wrap; font-weight: bold; background: #eee; padding: 15px; border-radius: 5px;">{befund}</p>
+                <p style="white-space: pre-wrap; font-weight: bold; background: #eee; padding: 15px; border-radius: 5px;">{html.escape(empfehlung)}</p>
+                <h3>Messwerte</h3>
+                <div>{messwerte_html}</div>
                 <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1rem; align-items: start;">
                     <div>
                         <h4>Totpunktbild</h4>
@@ -92,6 +112,7 @@ async def get_status(dateiname: str):
                     </div>
                 </div>
             </div>
+            <button id="abbrechen-button" type="button" disabled hx-swap-oob="true">Analyse abgeschlossen</button>
         ''')
 
     if status in {"Abgebrochen", "Abbruch angefordert"}:
@@ -99,6 +120,7 @@ async def get_status(dateiname: str):
             <div id="analysestatus">
                 <p>Analyse wurde abgebrochen.</p>
             </div>
+            <button id="abbrechen-button" type="button" disabled hx-swap-oob="true">Analyse abgebrochen</button>
         ''')
         
     return HTMLResponse(content=f'''
@@ -120,6 +142,7 @@ async def cancel_video(dateiname: str):
                 <p>Abbruch angefordert. Die laufende Verarbeitung wird beendet.</p>
             </div>
         </div>
+        <button id="abbrechen-button" type="button" disabled hx-swap-oob="true">Abbruch angefordert</button>
     ''')
 
 @app.get("/video/{dateiname}")

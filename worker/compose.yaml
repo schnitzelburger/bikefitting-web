@@ -8,4 +8,5 @@ services:
       - ./uploads:/app/uploads
       - ./processed:/app/processed
     ports: ["8000:8000"]
+    env_file: .env
     restart: always

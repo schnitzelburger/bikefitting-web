@@ -10,6 +10,7 @@ from ultralytics import YOLO
 
 TARGET_FLEXION = 35.0
 MIN_CONFIDENCE = 0.5
+YOLO_MODEL = os.getenv("YOLO_MODEL", "yolo11x-pose.pt")
 
 def waehle_geraet():
     if torch.cuda.is_available():
@@ -192,7 +193,7 @@ def analysiere_video(video_pfad, dateiname, status_speicher, ergebnis_speicher, 
 
     status_speicher[job_name] = "Pruefe Video und lade Modell..."
     device = waehle_geraet()
-    model = YOLO("yolo11x-pose.pt")
+    model = YOLO(YOLO_MODEL)
     model.to(device)
     cap = cv2.VideoCapture(video_pfad)
     fps = cap.get(cv2.CAP_PROP_FPS)
@@ -409,7 +410,7 @@ def analysiere_video(video_pfad, dateiname, status_speicher, ergebnis_speicher, 
         def draw_tile(y_pos, name, val, band_str, col, eval_str):
             draw.rectangle([tx, y_pos, width - 20*scale, y_pos + 120*scale], fill=(20,20,20,200), outline=col, width=int(3*scale))
             draw.text((tx + 15*scale, y_pos + 10*scale), name, font=font_sml, fill=(200,200,200,255))
-            draw.text((width - 120*scale, y_pos + 10*scale), eval_str, font=font_sml, fill=col)
+            draw.text((width - 180*scale, y_pos + 10*scale), eval_str, font=font_sml, fill=col)
             draw.text((tx + 15*scale, y_pos + 40*scale), f"{val:.1f}°", font=font_med, fill=(255,255,255,255))
             draw.text((tx + 15*scale, y_pos + 90*scale), band_str, font=font_sml, fill=(150,150,150,255))
             

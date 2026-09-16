@@ -15,6 +15,11 @@
         #analysestatus { margin-top: 1rem; }
         .analyse-status-text { margin-bottom: .5rem; }
         .analyse-progress { width: 100%; height: 1rem; accent-color: #166534; }
+        .input-row, .action-row { display: flex; align-items: end; gap: 1rem; flex-wrap: wrap; }
+        .input-group { display: flex; align-items: center; gap: .5rem; }
+        .input-group label { white-space: nowrap; }
+        .input-group input { width: 7rem; }
+        .upload-hint { margin: .5rem 0 1rem; color: #666; }
         #ladeanzeige { display: none; color: #666; margin-top: 1rem; }
         .htmx-request #ladeanzeige { display: block; }
         .htmx-request button { display: none; }
@@ -27,21 +32,28 @@
         <span>Worker wird geprüft...</span>
     </div>
     <h1>Rennrad Sitzposition messen</h1>
-    <p>Lade dein Video von der Seite hoch.</p>
+    <h2>Analysiere deine Sitzposition mit Hilfe von Videoanalyse.</h2>
+    <p class="upload-hint">Bitte lade ein Video hoch, in dem du von der Seite auf dem Fahrrad zu sehen bist. Achte darauf, dass die Kamera auf Höhe des Knies positioniert ist und das gesamte Bein sichtbar ist.</p>
     
     <form hx-post="/upload" hx-encoding="multipart/form-data" hx-target="#ergebnis">
+        <div class="input-row">
+            <div class="input-group">
+                <label for="oberschenkel">Oberschenkel in mm:</label>
+                <input id="oberschenkel" type="number" name="oberschenkel" value="450" required>
+            </div>
+            <div class="input-group">
+                <label for="unterschenkel">Unterschenkel in mm:</label>
+                <input id="unterschenkel" type="number" name="unterschenkel" value="475" required>
+            </div>
+        </div>
         <p>
-            <label>Oberschenkel in mm:</label><br>
-            <input type="number" name="oberschenkel" value="450" required>
-        </p>
-        <p>
-            <label>Unterschenkel in mm:</label><br>
-            <input type="number" name="unterschenkel" value="475" required>
-        </p>
-        <p>
+            <label for="video">Video hochladen:</label>
             <input type="file" name="video" accept="video/*" required>
         </p>
-        <button type="submit">Video analysieren</button>
+        <div class="action-row">
+            <button type="submit">Video analysieren</button>
+            <button id="abbrechen-button" type="button" disabled>Analyse abbrechen</button>
+        </div>
         <div id="ladeanzeige">
             <p>Bitte warten. Die Analyse laeuft und kann ein paar Minuten dauern.</p>
         </div>
