@@ -35,8 +35,13 @@ async def upload_video(
         await client.post(f"{WORKER_URL}/analyze", files=files, data=data, timeout=60.0)
     
     return HTMLResponse(content=f'''
-        <div id="analysestatus" hx-get="/status/{video.filename}" hx-trigger="every 2s" hx-swap="outerHTML">
-            <p>Analyse gestartet. Bitte warten...</p>
+        <div id="analyse-container">
+            <div id="analysestatus" hx-get="/status/{video.filename}" hx-trigger="every 2s" hx-swap="outerHTML">
+                <p>Analyse gestartet. Bitte warten...</p>
+            </div>
+            <button type="button" hx-post="/cancel/{video.filename}" hx-target="#analyse-container" hx-swap="outerHTML">
+                Analyse abbrechen
+            </button>
         </div>
     ''')
 
@@ -54,7 +59,7 @@ async def get_status(dateiname: str):
             <div id="analysestatus">
                 <h3>Ergebnis</h3>
                 <p style="white-space: pre-wrap; font-weight: bold; background: #eee; padding: 15px; border-radius: 5px;">{befund}</p>
-                <img src="/image/{dateiname}.jpg" width="100%">
+                <img src="/image/{dateiname}" width="100%">
                 <video width="100%" controls>
                     <source src="/video/{dateiname}" type="video/mp4">
                 </video>
@@ -71,7 +76,6 @@ async def get_status(dateiname: str):
     return HTMLResponse(content=f'''
         <div id="analysestatus" hx-get="/status/{dateiname}" hx-trigger="every 2s" hx-swap="outerHTML">
             <p>Aktueller Status: {status}</p>
-            <button type="button" hx-post="/cancel/{dateiname}" hx-target="#analysestatus" hx-swap="outerHTML">Analyse abbrechen</button>
         </div>
     ''')
 
@@ -82,8 +86,10 @@ async def cancel_video(dateiname: str):
         response.raise_for_status()
 
     return HTMLResponse(content=f'''
-        <div id="analysestatus">
-            <p>Abbruch angefordert. Die laufende Verarbeitung wird beendet.</p>
+        <div id="analyse-container">
+            <div id="analysestatus">
+                <p>Abbruch angefordert. Die laufende Verarbeitung wird beendet.</p>
+            </div>
         </div>
     ''')
 

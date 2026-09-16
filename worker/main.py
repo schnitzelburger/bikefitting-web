@@ -11,6 +11,7 @@ os.makedirs("processed", exist_ok=True)
 status_speicher = {}
 ergebnis_speicher = {}
 abbruch_signale = {}
+fortschritt_speicher = {}
 
 @app.get("/health")
 async def health_check():
@@ -31,6 +32,7 @@ async def task_verarbeiten(dateiname: str, a_thigh: float, b_calf: float):
         a_thigh,
         b_calf,
         abbruch_signale,
+        fortschritt_speicher,
     )
     
     status_speicher[dateiname] = "Fertig" if abgeschlossen else "Abgebrochen"
@@ -46,6 +48,7 @@ async def task_verarbeiten(dateiname: str, a_thigh: float, b_calf: float):
     status_speicher.pop(dateiname, None)
     ergebnis_speicher.pop(dateiname, None)
     abbruch_signale.pop(dateiname, None)
+    fortschritt_speicher.pop(dateiname, None)
 
 @app.post("/analyze")
 async def analyze_video(
@@ -56,6 +59,11 @@ async def analyze_video(
 ):
     ziel = f"uploads/{video.filename}"
     abbruch_signale[video.filename] = False
+    fortschritt_speicher[video.filename] = {
+        "frames_analysiert": 0,
+        "gesamt_frames": 0,
+        "prozent": 0.0,
+    }
     with open(ziel, "wb") as f:
         while chunk := await video.read(1024 * 1024):
             f.write(chunk)
@@ -76,7 +84,16 @@ async def cancel_video(dateiname: str):
 async def get_status(dateiname: str):
     status = status_speicher.get(dateiname, "Unbekannt")
     befund = ergebnis_speicher.get(dateiname, "")
-    return JSONResponse(content={"status": status, "befund": befund})
+    fortschritt = fortschritt_speicher.get(dateiname, {
+        "frames_analysiert": 0,
+        "gesamt_frames": 0,
+        "prozent": 0.0,
+    })
+    return JSONResponse(content={
+        "status": status,
+        "befund": befund,
+        **fortschritt,
+    })
 
 @app.get("/video/{dateiname}")
 async def get_video(dateiname: str):
@@ -84,4 +101,5 @@ async def get_video(dateiname: str):
 
 @app.get("/image/{dateiname}")
 async def get_image(dateiname: str):
-    return FileResponse(f"processed/bild_{dateiname}.jpg")
+    bild_name = os.path.splitext(dateiname)[0]
+    return FileResponse(f"processed/bild_{bild_name}.jpg")

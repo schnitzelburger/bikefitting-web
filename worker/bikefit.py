@@ -32,7 +32,7 @@ def interpolate_nones(arr):
             else: arr[i] = 0.0
     return arr
 
-def analysiere_video(video_pfad, dateiname, status_speicher, ergebnis_speicher, a_thigh, b_calf, abbruch_signale):
+def analysiere_video(video_pfad, dateiname, status_speicher, ergebnis_speicher, a_thigh, b_calf, abbruch_signale, fortschritt_speicher):
     job_name = os.path.basename(dateiname)
     if job_name.startswith("out_"):
         job_name = job_name[4:]
@@ -51,6 +51,11 @@ def analysiere_video(video_pfad, dateiname, status_speicher, ergebnis_speicher, 
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     scale = width / 1080.0
+    fortschritt_speicher[job_name] = {
+        "frames_analysiert": 0,
+        "gesamt_frames": frame_count,
+        "prozent": 0.0,
+    }
 
     frames_data = []
     left_confs, right_confs = [], []
@@ -67,13 +72,17 @@ def analysiere_video(video_pfad, dateiname, status_speicher, ergebnis_speicher, 
         ret, frame = cap.read()
         if not ret: break
         
-        if count % 10 == 0:
-            status_speicher[job_name] = f"Lese Positionen Bild {count} von {frame_count}"
         count += 1
+        prozent = count / frame_count * 100 if frame_count else 0.0
+        fortschritt_speicher[job_name] = {
+            "frames_analysiert": count,
+            "gesamt_frames": frame_count,
+            "prozent": prozent,
+        }
+        status_speicher[job_name] = f"Lese Positionen Bild {count} von {frame_count} ({prozent:.2f}%)"
 
         if time.monotonic() - letzter_log >= 3:
-            fortschritt = count / frame_count * 100 if frame_count else 0
-            print(f"Analyse {dateiname}: {fortschritt:.1f}% ({count}/{frame_count} Frames)", flush=True)
+            print(f"Analyse {dateiname}: {prozent:.2f}% ({count}/{frame_count} Frames)", flush=True)
             letzter_log = time.monotonic()
         
         results = model(frame, verbose=False)
@@ -274,8 +283,8 @@ def analysiere_video(video_pfad, dateiname, status_speicher, ergebnis_speicher, 
     if os.path.exists(temp_out): os.remove(temp_out)
 
     if bester_frame is not None:
-        bild_pfad = os.path.join(os.path.dirname(final_out), f"bild_{job_name}")
-        bild_pfad = os.path.splitext(bild_pfad)[0] + ".jpg"
+        bild_name = os.path.splitext(job_name)[0]
+        bild_pfad = os.path.join(os.path.dirname(final_out), f"bild_{bild_name}.jpg")
         cv2.imwrite(bild_pfad, bester_frame)
 
     if 27.5 <= med_ut_flexion <= 42.5:
