@@ -17,7 +17,17 @@
     <p>Lade dein Video von der Seite hoch.</p>
     
     <form hx-post="/upload" hx-encoding="multipart/form-data" hx-target="#ergebnis">
-        <input type="file" name="video" accept="video/*" required>
+        <p>
+            <label>Oberschenkel in mm:</label><br>
+            <input type="number" name="oberschenkel" value="450" required>
+        </p>
+        <p>
+            <label>Unterschenkel in mm:</label><br>
+            <input type="number" name="unterschenkel" value="475" required>
+        </p>
+        <p>
+            <input type="file" name="video" accept="video/*" required>
+        </p>
         <button type="submit">Video analysieren</button>
         <div id="ladeanzeige">
             <p>Bitte warten. Die Analyse laeuft und kann ein paar Minuten dauern.</p>
